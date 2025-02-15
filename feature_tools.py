@@ -28,7 +28,7 @@ def infer_image_with_features(model, raw_image, input_size=518):
 
     return depth.detach().cpu().numpy(), [feat.detach().cpu().numpy() for feat in features]
 
-def visualize_features(feature_maps, mask, layers, depth_map,raw_img,file_name):
+def visualize_features(feature_maps, mask, layers, depth_map,raw_img,file_name,dist_map):
     """
     显示不同层的 ViT 特征图，并在 entropy 图上绘制 mask 轮廓。
     """
@@ -43,13 +43,15 @@ def visualize_features(feature_maps, mask, layers, depth_map,raw_img,file_name):
     original_contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # 在深度图上绘制原始 mask 轮廓
-    cv2.drawContours(depth_map, original_contours, -1, (0, 255, 0), 6)
+    #cv2.drawContours(depth_map, original_contours, -1, (0, 255, 0), 6)
 
     # 显示深度图
     # ax = axes[0]
     # ax.imshow(raw_img, cmap='inferno')
     # ax.set_title("Raw Fig", fontsize=16)  # 设置字体大小
     # ax.axis("off")
+
+    fig,axes = plt.subplots(1,len(dist_map),figsize=(20,6))
 
     data = [file_name]
 
@@ -60,16 +62,30 @@ def visualize_features(feature_maps, mask, layers, depth_map,raw_img,file_name):
         glass_entropy, all_entropy,other_entropy = calculate_shannon_entropy(feature_map, resized_mask)
 
         # **转换 entropy 图为 NumPy 并归一化**
-        all_entropy_np = all_entropy.numpy()
-        all_entropy_norm = cv2.normalize(all_entropy_np, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        all_entropy_color = cv2.applyColorMap(all_entropy_norm, cv2.COLORMAP_HOT)  # 伪彩色映射
+        # all_entropy_np = all_entropy.numpy()
+        # all_entropy_norm = cv2.normalize(all_entropy_np, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # all_entropy_color = cv2.applyColorMap(all_entropy_norm, cv2.COLORMAP_HOT)  # 伪彩色映射
 
-        # **在 entropy 图上绘制 mask 轮廓**
-        cv2.drawContours(all_entropy_color, mask_contours, -1, (255, 0, 0), 1)
-
+        # # **在 entropy 图上绘制 mask 轮廓**
+        # cv2.drawContours(all_entropy_color, mask_contours, -1, (255, 0, 0), 1)
         # **显示 entropy 图**
         # ax = axes[i + 1]
         # im = ax.imshow(all_entropy_color)
+        dist_map_np = dist_map[i].cpu().numpy()
+    
+    # **归一化并转换为伪彩色**
+        dist_map_norm = cv2.normalize(dist_map_np, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        dist_map_color = cv2.applyColorMap(dist_map_norm, cv2.COLORMAP_HOT)  # 伪彩色映射
+
+    # **调整 mask 并提取轮廓**
+        resized_mask = cv2.resize(mask.astype(np.uint8), (dist_map.shape[2], dist_map.shape[1]))
+        mask_contours, _ = cv2.findContours(resized_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # **绘制 mask 轮廓**
+        cv2.drawContours(dist_map_color, mask_contours, -1, (255, 0, 0), 1)  # 轮廓颜色红色 (255,0,0)，线宽 2
+
+    # **显示带有 mask 轮廓的 L2 距离图**
+        im = axes[i].imshow(dist_map_color)  
         glass_value = glass_entropy.sum()/glass_entropy.count_nonzero()
         other_value = other_entropy.sum()/other_entropy.count_nonzero()
         data.append(round(glass_value.item(),3))
@@ -77,6 +93,13 @@ def visualize_features(feature_maps, mask, layers, depth_map,raw_img,file_name):
         # ax.set_title(f"Layer {layers[i]}\nGlass entropy:{glass_value:.3f}, Other:{other_value:.3f}", 
         #              fontsize=14)  # 设置标题字体大小
         # ax.axis("off")
+
+        mean_dist = torch.mean(dist_map[i])
+        axes[i].set_title(f"Feature Map Layer {layers[i]} Dist\n mean dist:{mean_dist}", fontsize=16)
+        axes[i].axis("off")
+
+        # 添加 colorbar
+
 
     # **添加 colorbar**
     # ax = axes[5]
@@ -86,7 +109,9 @@ def visualize_features(feature_maps, mask, layers, depth_map,raw_img,file_name):
     # ax.axis("off")
 
     # plt.savefig(f"depth_vis/feature_entropies_{file_name}.png", dpi=150, bbox_inches='tight')  # 高分辨率保存
-    # plt.close(fig)
+    plt.colorbar(im, ax=axes[3], fraction=0.046, pad=0.04)
+    plt.savefig(f"depth_vis/feature_distances_{file_name}.png", dpi=150, bbox_inches='tight')
+    plt.close(fig)
     return data
 
 
@@ -107,15 +132,14 @@ def calculate_shannon_entropy(feature_map,resized_mask):
         for y in range(w):
             masked_values = feature_map[:, x, y][mask[:, x, y]]
             other_values = feature_map[:, x, y]
-            mean_map = np.mean(feature_map,axis=0)
             soft_mask,soft_other = F.softmax(masked_values,dim=0),F.softmax(other_values,dim=0)
             entropy_mask,entropy_other = -torch.sum(soft_mask * torch.log(soft_mask + 1e-10)),-torch.sum(soft_other * torch.log(soft_other + 1e-10))
             entropy_glass[x,y],entropy[x,y] = entropy_mask,entropy_other
-    return entropy_glass,entropy,entropy-entropy_glass,mean_map      #glass,all,all but glass
+    return entropy_glass,entropy,entropy-entropy_glass     #glass,all,all but glass
 
 def calculate_l2_distance(feature_maps,feature_maps_sharpened):
     size = len(feature_maps)
-    H,W = feature_maps[0].shape[3],feature_maps[0].shape[2]
+    H,W = feature_maps[0].shape[2],feature_maps[0].shape[3]
     dist = torch.zeros(size,H,W)
     for i in range(size):
         dist[i,:,:] = torch.norm(feature_maps[i] - feature_maps_sharpened[i],p=2,dim=1).squeeze(0)

@@ -42,6 +42,8 @@ os.makedirs(output_dir, exist_ok=True)
 # 获取所有图片文件
 photo_files = sorted([f for f in os.listdir(photo_dir) if f.endswith(('.jpg', '.png'))])
 
+count = 0
+
 # 进度条，显示进度
 for photo_file in tqdm(photo_files, desc="Processing Images", unit="image"):
     # 获取文件名（不带扩展名）
@@ -66,16 +68,22 @@ for photo_file in tqdm(photo_files, desc="Processing Images", unit="image"):
     ], dtype=np.float32)
     sharpened_img = cv2.filter2D(img_rgb, -1, sharpen_kernel)
     sharpened_img_rgb = cv2.cvtColor(sharpened_img, cv2.COLOR_BGR2RGB)
-    raw_img = sharpened_img_rgb  # 替换原始图像
     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
     
     # 获取深度图和特征
     depth_map, feature_maps = infer_image_with_features(model, raw_img)
+    _,sharpened_feature_maps = infer_image_with_features(model,sharpened_img_rgb)
+
+    dist_map = calculate_l2_distance(torch.tensor(np.array(feature_maps)),torch.tensor(np.array(sharpened_feature_maps)))
 
     # 显示不同层的特征图
     layers = [2, 5, 8, 11]
-    line = visualize_features(feature_maps, mask, layers, depth_map, raw_img, file_name)
+    line = visualize_features(feature_maps, mask, layers, depth_map, raw_img, file_name,dist_map)
     rows.append(line)
+
+    count += 1
+    if count > 5:
+        break
 
 
 print("✅ 批量处理完成！")
