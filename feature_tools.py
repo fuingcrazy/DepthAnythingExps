@@ -107,10 +107,19 @@ def calculate_shannon_entropy(feature_map,resized_mask):
         for y in range(w):
             masked_values = feature_map[:, x, y][mask[:, x, y]]
             other_values = feature_map[:, x, y]
+            mean_map = np.mean(feature_map,axis=0)
             soft_mask,soft_other = F.softmax(masked_values,dim=0),F.softmax(other_values,dim=0)
             entropy_mask,entropy_other = -torch.sum(soft_mask * torch.log(soft_mask + 1e-10)),-torch.sum(soft_other * torch.log(soft_other + 1e-10))
             entropy_glass[x,y],entropy[x,y] = entropy_mask,entropy_other
-    return entropy_glass,entropy,entropy-entropy_glass      #glass,all,all but glass
+    return entropy_glass,entropy,entropy-entropy_glass,mean_map      #glass,all,all but glass
+
+def calculate_l2_distance(feature_maps,feature_maps_sharpened):
+    size = len(feature_maps)
+    H,W = feature_maps[0].shape[3],feature_maps[0].shape[2]
+    dist = torch.zeros(size,H,W)
+    for i in range(size):
+        dist[i,:,:] = torch.norm(feature_maps[i] - feature_maps_sharpened[i],p=2,dim=1).squeeze(0)
+    return dist
 
 
 
